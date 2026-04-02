@@ -6,6 +6,8 @@ import asyncio
 from datetime import datetime
 import threading
 import time
+import os
+
 
 # Import both scanners
 from scanner import CryptoScanner  # Your original Bybit scanner
@@ -13,13 +15,19 @@ from mexc_scanner import MexcWickScanner  # MEXC scanner
 
 app = FastAPI(title="Crypto Scanner API", version="1.0.0")
 
+ALLOWED_ORIGINS = os.getenv(
+    "ALLOWED_ORIGINS", 
+    "http://localhost:3000,http://localhost:8000"
+).split(",")
+
 # Enable CORS for React frontend
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:8000", "*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
 )
 
 # Initialize scanners
