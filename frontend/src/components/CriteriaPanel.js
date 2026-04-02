@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FaInfoCircle, FaFilter, FaClock, FaChartLine, FaChevronDown, FaChevronUp } from 'react-icons/fa';
+import { FaInfoCircle, FaChartLine, FaChevronDown, FaChevronUp } from 'react-icons/fa';
 
 const CriteriaPanel = ({ criteria }) => {
   const [showDetails, setShowDetails] = useState(false);
