@@ -32,7 +32,7 @@ app.add_middleware(
 
 # Initialize scanners
 bybit_scanner = CryptoScanner()
-mexc_scanner = MexcWickScanner(top_volume_limit=200)  # Scan top 200 by volume
+mexc_scanner = MexcWickScanner()  # Scan all pairs
 
 # Store for background scan results
 scan_cache = {
@@ -78,7 +78,7 @@ async def perform_mexc_scan():
         print(f"🚫 Filter: BOTH sides significant = indecision (filtered out)")
         
         # Use the full_scan method
-        results = await mexc_scanner.full_scan(max_workers=20)
+        results = await mexc_scanner.full_scan(max_workers=50)
         
         # Format results for frontend
         if 'error' not in results:

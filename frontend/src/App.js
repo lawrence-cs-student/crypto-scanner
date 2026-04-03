@@ -83,7 +83,7 @@ function App() {
       // Trigger the scan
       await scannerAPI.triggerManualScan(scanner);
       
-      // Wait for scan to complete (3 seconds for API to process)
+      // Wait for scan to complete (15 seconds for API to process)
       setTimeout(async () => {
         clearInterval(interval);
         setScanProgress(100);
@@ -102,7 +102,7 @@ function App() {
         
         // Reset progress
         setTimeout(() => setScanProgress(0), 500);
-      }, 3000);
+      }, 15000);
       
     } catch (err) {
       setError(err.message);

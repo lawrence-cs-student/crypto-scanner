@@ -1,95 +1,65 @@
 import ccxt
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import List, Dict, Optional
-import time
 import warnings
 
 warnings.filterwarnings('ignore')
 
 
 class MexcWickScanner:
-    def __init__(self, api_key: str = None, api_secret: str = None, top_volume_limit: int = 200):
-        """
-        Initialize MEXC Wick Scanner - Scans top N futures pairs by volume
-        CRITERIA: 
-        - ONE SIDE (upper OR lower) must have wick >= 2x body size
-        - The OTHER SIDE must NOT also be significant (filter indecision candles)
-        - Indecision = both upper and lower wicks are >= body size
-        """
+    def __init__(self, api_key: str = None, api_secret: str = None, top_volume_limit: int = None):
         self.exchange = ccxt.mexc({
             'apiKey': api_key,
             'secret': api_secret,
             'enableRateLimit': True,
-            'options': {
-                'defaultType': 'future',
-            }
+            'options': {'defaultType': 'future'}
         })
-        
         self.timeframe = '30m'
-        self.required_candles = 100
-        self.top_volume_limit = top_volume_limit
-        
-        # Wick must be at least 4x the body size
+        self.top_volume_limit = top_volume_limit  # None = scan all
         self.min_wick_ratio = 4.0
-        
-        # Cache for symbols
-        self.cached_symbols = None
-        self.cached_symbols_with_volume = None
-        self.last_symbols_fetch = None
+        self._symbols_cache = None
+        self._symbols_cache_time = None
 
-    def get_top_futures_by_volume(self, force_refresh: bool = False) -> List[Dict]:
-        """Fetch top futures symbols by 24h volume"""
-        if not force_refresh and self.cached_symbols_with_volume and self.last_symbols_fetch:
-            if (datetime.now() - self.last_symbols_fetch).seconds < 300:
-                return self.cached_symbols_with_volume
-        
-        try:
-            print(f"🔄 Fetching MEXC futures by volume...")
-            markets = self.exchange.load_markets()
-            
-            all_futures = []
-            for symbol, market in markets.items():
-                if (market.get('future') or market.get('swap')) and '/USDT' in symbol:
-                    if market.get('linear', False) or not market.get('inverse', False):
-                        all_futures.append(symbol)
-            
-            print(f"📊 Found {len(all_futures)} total futures pairs")
-            
-            symbols_with_volume = []
-            for symbol in all_futures:
-                try:
-                    ticker = self.exchange.fetch_ticker(symbol)
-                    volume_24h = ticker.get('quoteVolume', 0)
-                    
-                    if volume_24h > 0:
-                        symbols_with_volume.append({
-                            'symbol': symbol,
-                            'volume_24h': volume_24h,
-                            'last_price': ticker.get('last', 0),
-                            'change_24h': ticker.get('percentage', 0),
-                            'high_24h': ticker.get('high', 0),
-                            'low_24h': ticker.get('low', 0)
-                        })
-                    time.sleep(0.05)
-                except:
-                    continue
-            
-            symbols_with_volume.sort(key=lambda x: x['volume_24h'], reverse=True)
-            top_symbols = symbols_with_volume[:self.top_volume_limit]
-            
-            self.cached_symbols_with_volume = top_symbols
-            self.cached_symbols = [s['symbol'] for s in top_symbols]
-            self.last_symbols_fetch = datetime.now()
-            
-            print(f"✅ Selected top {len(top_symbols)} pairs by volume")
-            return top_symbols
-            
-        except Exception as e:
-            print(f"❌ Volume fetch error: {e}")
-            if self.cached_symbols:
-                return [{'symbol': s, 'volume_24h': 0} for s in self.cached_symbols]
-            return []
+    def get_all_futures(self, force_refresh: bool = False) -> List[Dict]:
+        """Fetch all futures symbols with volume via single bulk tickers call"""
+        if not force_refresh and self._symbols_cache and self._symbols_cache_time:
+            if (datetime.now() - self._symbols_cache_time).seconds < 300:
+                return self._symbols_cache
+
+        print("🔄 Fetching MEXC futures symbols + tickers (bulk)...")
+        markets = self.exchange.load_markets()
+        futures_symbols = [
+            s for s, m in markets.items()
+            if (m.get('future') or m.get('swap'))
+            and '/USDT' in s
+            and not m.get('inverse', False)
+        ]
+        print(f"📊 Found {len(futures_symbols)} futures pairs")
+
+        # Single bulk call instead of one-by-one
+        tickers = self.exchange.fetch_tickers(futures_symbols)
+
+        result = []
+        for symbol, ticker in tickers.items():
+            result.append({
+                'symbol': symbol,
+                'volume_24h': ticker.get('quoteVolume', 0) or 0,
+                'last_price': ticker.get('last', 0),
+                'change_24h': ticker.get('percentage', 0),
+                'high_24h': ticker.get('high', 0),
+                'low_24h': ticker.get('low', 0)
+            })
+
+        result.sort(key=lambda x: x['volume_24h'], reverse=True)
+        if self.top_volume_limit:
+            result = result[:self.top_volume_limit]
+
+        self._symbols_cache = result
+        self._symbols_cache_time = datetime.now()
+        print(f"✅ Scanning {len(result)} pairs")
+        return result
 
     def calculate_candle_metrics(self, candle_data: list) -> Optional[Dict]:
         """Calculate candle metrics"""
@@ -224,7 +194,7 @@ class MexcWickScanner:
             ohlcv = self.exchange.fetch_ohlcv(
                 symbol=symbol,
                 timeframe=self.timeframe,
-                limit=self.required_candles
+                limit=2  # Only need last 2 candles
             )
             
             if len(ohlcv) < 2:
@@ -250,49 +220,23 @@ class MexcWickScanner:
         except Exception as e:
             return None
 
-    async def scan_symbols_async(self, symbols_with_volume: List[Dict], max_concurrent: int = 20) -> List[Dict]:
-        """Scan symbols asynchronously"""
-        results = []
-        semaphore = asyncio.Semaphore(max_concurrent)
-        
-        async def scan_one(symbol_info):
-            async with semaphore:
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(None, self.analyze_symbol, symbol_info)
-                return result
-        
-        tasks = [scan_one(symbol_info) for symbol_info in symbols_with_volume]
-        results = await asyncio.gather(*tasks)
-        
+    async def scan_symbols_async(self, symbols_with_volume: List[Dict], max_concurrent: int = 50) -> List[Dict]:
+        """Scan symbols using a ThreadPoolExecutor for true parallelism"""
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
+            tasks = [loop.run_in_executor(executor, self.analyze_symbol, s) for s in symbols_with_volume]
+            results = await asyncio.gather(*tasks)
         return [r for r in results if r is not None]
 
-    async def full_scan(self, max_workers: int = 20) -> Dict:
-        """Perform full scan of top MEXC futures pairs"""
+    async def full_scan(self, max_workers: int = 50) -> Dict:
+        """Perform full scan of all MEXC futures pairs"""
         try:
-            print(f"\n{'='*70}")
-            print(f"🚀 MEXC WICK SCANNER - NO INDECISION CANDLES")
-            print(f"📊 Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            print(f"📏 Criteria: ONE side (upper/lower) must be >= {self.min_wick_ratio}x body size")
-            print(f"🚫 Filter: BOTH sides significant = indecision (filtered out)")
-            print(f"📈 Volume Filter: Top {self.top_volume_limit} pairs by 24h volume")
-            print(f"{'='*70}")
-            
-            # Get top symbols by volume
-            symbols_with_volume = self.get_top_futures_by_volume()
-            
+            symbols_with_volume = self.get_all_futures()
+
             if not symbols_with_volume:
-                return {
-                    'error': 'No symbols found',
-                    'timestamp': datetime.now().isoformat(),
-                    'patterns': []
-                }
-            
-            print(f"\n📈 Scanning top {len(symbols_with_volume)} MEXC futures pairs...")
-            print(f"⚡ Using {max_workers} concurrent workers")
-            print(f"🎯 Looking for dominant wicks (one side only)")
-            print(f"🚫 Filtering out indecision candles (both sides have wicks)")
-            
-            # Scan all symbols
+                return {'error': 'No symbols found', 'timestamp': datetime.now().isoformat(), 'patterns': []}
+
+            print(f"⚡ Scanning {len(symbols_with_volume)} pairs with {max_workers} workers...")
             start_time = datetime.now()
             patterns = await self.scan_symbols_async(symbols_with_volume, max_concurrent=max_workers)
             scan_duration = (datetime.now() - start_time).total_seconds()
@@ -309,23 +253,8 @@ class MexcWickScanner:
             strong_patterns = [p for p in patterns if p['pattern_strength'] >= 3.0]  # 3x+
             extreme_patterns = [p for p in patterns if p['pattern_strength'] >= 5.0]  # 5x+
             
-            print(f"\n✅ Scan completed in {scan_duration:.1f} seconds")
-            print(f"📊 Results:")
-            print(f"   • Total scanned: {len(symbols_with_volume)} symbols")
-            print(f"   • Total patterns: {len(patterns)}")
-            print(f"   • 🔴 Top wicks (bearish): {len(top_wick_patterns)}")
-            print(f"   • 🟢 Bottom wicks (bullish): {len(bottom_wick_patterns)}")
-            print(f"   • 💪 Strong patterns (3x+): {len(strong_patterns)}")
-            print(f"   • ⚡ Extreme patterns (5x+): {len(extreme_patterns)}")
-            print(f"   • 🚫 Indecision candles filtered: Yes (both sides significant)")
-            
-            # Show top 5 strongest patterns
-            if patterns:
-                print(f"\n🏆 TOP 5 STRONGEST PATTERNS:")
-                for i, p in enumerate(patterns[:5]):
-                    print(f"   {i+1}. {p['symbol']}: {p['wick_type'].upper()} wick - {p['pattern_strength']:.1f}x body")
-                    print(f"      📊 {p['pattern_description']}")
-            
+            print(f"✅ Scan done in {scan_duration:.1f}s | {len(patterns)} patterns from {len(symbols_with_volume)} symbols")
+
             return {
                 'timestamp': datetime.now().isoformat(),
                 'exchange': 'MEXC',
