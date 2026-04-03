@@ -15,16 +15,13 @@ from mexc_scanner import MexcWickScanner  # MEXC scanner
 
 app = FastAPI(title="Crypto Scanner API", version="1.0.0")
 
-ALLOWED_ORIGINS = os.getenv(
-    "ALLOWED_ORIGINS", 
-    "http://localhost:3000,http://localhost:8000"
-).split(",")
-
-# Enable CORS for React frontend
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=[
+        "https://crypto-scanner-ecru.vercel.app",
+        "http://localhost:3000"
+    ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept"],
