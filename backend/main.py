@@ -30,7 +30,7 @@ app.add_middleware(
         "http://localhost:3000"
     ],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "HEAD", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept"],
 )
 
@@ -206,6 +206,10 @@ async def startup_event():
     print("🔄 Performing initial scans...")
     asyncio.create_task(perform_all_scans())
 
+@app.head("/")
+async def root_head():
+    return {}
+
 @app.get("/")
 async def root():
     return {
@@ -235,7 +239,7 @@ async def get_bybit_results(force_scan: bool = False):
         return {"message": "Bybit scan triggered", "status": "scanning"}
     
     if scan_cache["bybit"]["results"] is None:
-        raise HTTPException(status_code=404, detail="No scan results available yet")
+        return {"status": scan_cache["bybit"]["status"], "message": "Scan in progress, check back shortly"}
     
     if "error" in scan_cache["bybit"]["results"]:
         raise HTTPException(status_code=500, detail=scan_cache["bybit"]["results"]["error"])
@@ -250,7 +254,7 @@ async def get_mexc_results(force_scan: bool = False):
         return {"message": "MEXC scan triggered", "status": "scanning"}
     
     if scan_cache["mexc"]["results"] is None:
-        raise HTTPException(status_code=404, detail="No scan results available yet")
+        return {"status": scan_cache["mexc"]["status"], "message": "Scan in progress, check back shortly"}
     
     if "error" in scan_cache["mexc"]["results"]:
         raise HTTPException(status_code=500, detail=scan_cache["mexc"]["results"]["error"])
