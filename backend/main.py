@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict
@@ -7,13 +7,20 @@ from datetime import datetime
 import threading
 import time
 import os
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 
 # Import both scanners
 from scanner import CryptoScanner  # Your original Bybit scanner
 from mexc_scanner import MexcWickScanner  # MEXC scanner
 
+# Initialize rate limiter
+limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="Crypto Scanner API", version="1.0.0")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 app.add_middleware(
@@ -195,9 +202,9 @@ async def startup_event():
     thread = threading.Thread(target=schedule_scans, daemon=True)
     thread.start()
     
-    # Perform initial scans immediately
+    # Perform initial scans in background
     print("🔄 Performing initial scans...")
-    await perform_all_scans()
+    asyncio.create_task(perform_all_scans())
 
 @app.get("/")
 async def root():
@@ -286,13 +293,15 @@ async def get_status():
     }
 
 @app.post("/api/scan/bybit/manual")
-async def manual_bybit_scan():
+@limiter.limit("1/minute")
+async def manual_bybit_scan(request: Request):
     """Trigger manual Bybit scan"""
     asyncio.create_task(perform_bybit_scan())
     return {"message": "Manual Bybit scan triggered", "status": "scanning"}
 
 @app.post("/api/scan/mexc/manual")
-async def manual_mexc_scan():
+@limiter.limit("1/minute")
+async def manual_mexc_scan(request: Request):
     """Trigger manual MEXC scan"""
     asyncio.create_task(perform_mexc_scan())
     return {
