@@ -29,32 +29,36 @@ function App() {
   const [activeScanner, setActiveScanner] = useState('bybit');
   const [scanProgress, setScanProgress] = useState(0);
 
-  const fetchData = async () => {
+  const fetchBybit = async () => {
     try {
-      setError(null);
-      
-      // Fetch both scanners data
-      const [bybitResponse, mexcResponse, statusResponse] = await Promise.all([
+      const [bybitResponse, statusResponse] = await Promise.all([
         scannerAPI.getScanResults('bybit'),
-        scannerAPI.getScanResults('mexc'),
         scannerAPI.getStatus()
       ]);
-      
       setBybitData(bybitResponse);
-      setMexcData(mexcResponse);
       setBybitStatus(statusResponse.bybit);
       setMexcStatus(statusResponse.mexc);
-      
-      // Set loading to false for both
-      setBybitLoading(false);
-      setMexcLoading(false);
-      
     } catch (err) {
-      console.error('Fetch error:', err);
-      setError(err.response?.data?.detail || err.message || 'Failed to fetch data');
+      console.error('Bybit fetch error:', err);
+    } finally {
       setBybitLoading(false);
+    }
+  };
+
+  const fetchMexc = async () => {
+    try {
+      const response = await scannerAPI.getScanResults('mexc');
+      setMexcData(response);
+    } catch (err) {
+      console.error('MEXC fetch error:', err);
+    } finally {
       setMexcLoading(false);
     }
+  };
+
+  const fetchData = () => {
+    fetchBybit();
+    fetchMexc();
   };
 
   const handleManualScan = async (scanner) => {
@@ -88,8 +92,9 @@ function App() {
         clearInterval(interval);
         setScanProgress(100);
         
-        // Fetch updated data
-        await fetchData();
+          // Fetch updated data for the triggered scanner only
+        if (scanner === 'bybit') await fetchBybit();
+        else await fetchMexc();
         
         // Reset scanning states
         if (scanner === 'bybit') {

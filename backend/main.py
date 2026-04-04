@@ -336,19 +336,4 @@ async def get_mexc_criteria():
 
 @app.get("/api/health")
 async def health_check():
-    """Health check endpoint"""
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "scanners": {
-            "bybit": scan_cache["bybit"]["status"],
-            "mexc": scan_cache["mexc"]["status"]
-        },
-        "mexc_criteria": {
-            "active": True,
-            "min_wick_ratio": mexc_scanner.min_wick_ratio,
-            "top_volume_limit": mexc_scanner.top_volume_limit,
-            "single_sided_only": True,
-            "filter_indecision": True
-        }
-    }
+    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
